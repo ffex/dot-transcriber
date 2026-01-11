@@ -1,0 +1,28 @@
+# Rust
+/target
+Cargo.lock
+
+# Configuration (contains secrets)
+config.toml
+.env
+
+# Output directories
+/output
+/temp
+
+# Logs
+*.log
+dot.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+initialPrompt.md

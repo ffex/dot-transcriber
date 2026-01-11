@@ -1,0 +1,49 @@
+# Dot Configuration File
+# Copy this file to config.toml and fill in your values
+
+[telegram]
+# Get this from @BotFather on Telegram
+bot_token = "YOUR_BOT_TOKEN_HERE"
+# Polling interval in seconds
+poll_interval = 2
+
+[transcription]
+# Options: "whisper_api", "whisper_local", "other"
+service = "whisper_api"
+# Language code (ISO 639-1)
+language = "it"
+# For whisper_api: your OpenAI API key (or set via OPENAI_API_KEY env var)
+# For whisper_local: path to model file
+model = "whisper-1"
+
+[ai_model]
+# Options: "ollama", "openai", "anthropic"
+provider = "ollama"
+# Model name (e.g., "llama2", "gpt-4", "claude-3-sonnet")
+model = "llama2"
+# API endpoint for Ollama (typically http://localhost:11434)
+endpoint = "http://localhost:11434"
+# Temperature for generation (0.0 - 1.0)
+temperature = 0.7
+
+[output]
+# Directory where notes will be saved
+notes_dir = "./output/notes"
+# Directory where tasks will be saved (if enabled)
+tasks_dir = "./output/tasks"
+# Temporary directory for audio downloads
+temp_dir = "./temp"
+
+[features]
+# Enable task extraction
+enable_task_extraction = true
+# Enable automatic tagging
+enable_auto_tags = true
+# Maximum audio file size in MB
+max_audio_size_mb = 20
+
+[logging]
+# Log level: "error", "warn", "info", "debug", "trace"
+level = "info"
+# Log to file
+log_file = "./dot.log"
