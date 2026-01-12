@@ -13,9 +13,10 @@ Dot is an AI assistant Telegram bot that helps transform voice messages into str
 - **Language**: Rust
 - **Bot**: Telegram Bot API (teloxide)
 - **Transcription**: whisper-rs (local whisper.cpp with Metal/CUDA acceleration)
-- **Audio Processing**: symphonia + hound
-- **AI Processing**: Ollama (local) or API-based models (OpenAI, Anthropic) - Coming in Phase 3
-- **Output Format**: Markdown (.md)
+- **Audio Processing**: symphonia + hound + ffmpeg (Opus support)
+- **AI Processing**: Ollama (local/remote LAN) with llama3.2/llama3.3 ✅
+- **Note Generation**: Custom prompts + LLM-based transcription cleanup ✅
+- **Output Format**: Markdown (.md) with frontmatter
 
 ---
 
@@ -80,7 +81,7 @@ Dot is an AI assistant Telegram bot that helps transform voice messages into str
 ---
 
 ### Phase 3: Note Generation with AI
-**Status**: 🔴 Not Started
+**Status**: 🟢 Complete & Tested ✅
 
 **Goals**:
 - Process transcribed text with AI model
@@ -88,15 +89,23 @@ Dot is an AI assistant Telegram bot that helps transform voice messages into str
 - Support multiple note types
 
 **Tasks**:
-- [ ] Set up Ollama locally OR choose cloud API
-- [ ] Design prompt for note generation
-- [ ] Implement model integration
-- [ ] Parse model output to valid markdown
-- [ ] Define note structure and frontmatter
-- [ ] Handle long transcripts (chunking if needed)
-- [ ] Save notes to output directory
+- [x] Research best Ollama models for Italian (llama3.2:3b, llama3.3, mistral)
+- [x] Set up Ollama provider architecture with trait system
+- [x] Design Italian prompt for note generation
+- [x] Implement Ollama integration (local + remote LAN support)
+- [x] Create Note structure with markdown generation
+- [x] Parse model JSON output to Note objects
+- [x] Define note structure and frontmatter (title, date, tags, source)
+- [x] Save notes to output directory as .md files
+- [x] **Add transcription cleanup step** (LLM-based error correction)
+- [x] Implement three-step pipeline: transcribe → cleanup → generate notes
+- [x] Test with real Italian voice messages
+- [x] Verify remote Ollama works (Windows PC in LAN)
 
 **Dependencies**: Phase 2 complete
+
+**Completed**: 2026-01-11
+**Tested**: 2026-01-11 ✅
 
 ---
 
@@ -121,37 +130,63 @@ Dot is an AI assistant Telegram bot that helps transform voice messages into str
 
 ## Current Status
 
-**Active Phase**: Phase 2 Complete ✅ - Ready for Phase 3
+**Active Phase**: Phase 3 Complete ✅ - System Fully Functional! 🎉
 **Last Updated**: 2026-01-11
 
-### What We Have
-- ✅ Rust project initialized (`dot_transcriber`)
-- ✅ Project tracking documents (where-are-we.md, ClaudePrompts.md, AIPrompts.md)
-- ✅ Configuration system (config.toml + .env support)
-- ✅ Telegram bot fully functional with teloxide
-- ✅ Commands: /start, /help, /status (all in Italian)
-- ✅ Audio message detection (voice messages & audio files)
-- ✅ Message routing with dptree
-- ✅ Modular code structure (main.rs, config.rs, handlers.rs, transcription.rs)
-- ✅ Logging system with pretty_env_logger
-- ✅ **Audio transcription working!**
-  - Downloads audio from Telegram
-  - Converts any format to WAV
-  - Transcribes with Whisper (Italian)
-  - Returns transcribed text
-- ✅ Whisper model downloaded (ggml-base.bin, 141MB)
+**STATUS**: All core features working! Voice → Transcription → Cleanup → Notes → Saved files ✅
+
+### What We Have - Complete Working System! 🎉
+- ✅ **Full Voice-to-Notes Pipeline Working:**
+  1. Voice message → Telegram download
+  2. Audio conversion (ffmpeg fallback for Opus codec)
+  3. Whisper transcription (Italian, Metal accelerated)
+  4. **LLM cleanup** (fixes transcription errors using context)
+  5. **AI note generation** (Ollama, structured markdown with tags)
+  6. Save to files (`./output/notes/*.md`) with frontmatter
+- ✅ Modular code structure (main.rs, config.rs, handlers.rs, transcription.rs, **note_generator.rs**)
+- ✅ Ollama integration (local + **remote LAN support**)
+- ✅ Working with remote Ollama on Windows PC (192.168.1.22)
+- ✅ Whisper model: ggml-base.bin (141MB)
 - ✅ Metal acceleration for M1 Mac
+- ✅ All commands in Italian
+- ✅ Progress messages show each step
+- ✅ Shows both original and cleaned transcription
 
-### What We're Working On
-- ✅ Transcription tested and working!
-- Preparing for Phase 3: AI Note Generation
+### What's Working Right Now
+**System is fully functional!** Send voice → Get structured notes as .md files ✅
 
-### Next Steps
-1. ✅ ~~Test transcription with Italian voice messages~~ **DONE!**
-2. Implement user authentication (security enhancement)
-3. Begin Phase 3: AI-powered note generation with Ollama/API
-4. Design note format and structure
-5. Implement markdown note generation
+### Next Steps - Your Choice!
+
+**Option 1: Use It & Improve** ⭐ RECOMMENDED
+- Use the system for a few days
+- See what needs improvement
+- Iterate on transcription cleanup prompts
+- Tune note generation quality
+
+**Option 2: Phase 4 - Task Extraction** (Optional)
+- Extract TODO items from notes automatically
+- Parse developer tasks from voice memos
+- Create separate task files
+- Priority detection
+
+**Option 3: Security** (From Federico's Tasks)
+- Implement user authentication
+- Only authorized users can use bot
+- Add `allowed_users` list to config
+- Reject unauthorized users
+
+**Option 4: Documentation & Deployment**
+- Write complete README for installation
+- **Create Homebrew recipe** (Federico's suggestion!)
+- systemd service for Linux
+- Windows service setup
+- Complete setup guide
+
+**Option 5: Code Quality**
+- Remove camelCase variables (Federico's task)
+- Run cargo clippy
+- Add tests
+- Improve error handling
 
 ---
 
@@ -179,6 +214,39 @@ Dot is an AI assistant Telegram bot that helps transform voice messages into str
 ---
 
 ## Notes & Decisions Log
+
+### 2026-01-11: Phase 3 Complete - Full System Working! 🎉✅
+- ✅ **Phase 3 fully implemented, tested, and working!**
+- **Complete voice-to-notes pipeline operational**:
+  - Voice message → Transcribe → **LLM cleanup** → Generate notes → Save .md files
+- **Ollama integration successful**:
+  - Researched Italian language models (llama3.2:3b, llama3.3, mistral, OpenEuroLLM-Italian)
+  - Chose llama3.2:3b for M1 Mac testing (fast, 2GB)
+  - Working with **remote Ollama** on Windows PC (192.168.1.22:11434)
+  - Local/remote switch via config.endpoint
+- **Three-step intelligent processing implemented**:
+  1. Whisper transcription (may have recognition errors)
+  2. **LLM cleanup** (fixes errors using Italian context) ⭐ KEY FEATURE
+  3. Note generation (from cleaned transcript)
+- **Transcription cleanup feature** (User's suggestion!):
+  - LLM corrects Whisper misrecognitions before note generation
+  - Fixes: wrong words, grammar, punctuation, capitalization
+  - Temperature 0.3 for precise corrections
+  - Shows both original and corrected versions to user
+  - Graceful fallback to raw transcript if cleanup fails
+- **Note structure & quality**:
+  - Markdown with frontmatter (title, date, tags, source)
+  - Intelligent multi-topic detection (creates separate notes)
+  - Automatic filename generation from title + timestamp
+  - Saved to `./output/notes/`
+  - Tags automatically suggested by LLM
+- **User experience polished**:
+  - Progress messages in Italian at each step
+  - Shows note titles, tags, and filenames
+  - Displays both cleaned and original transcription
+  - Clear error messages with helpful hints
+- **System Status**: Fully functional end-to-end! 🎉
+- **Next**: User will use it for a few days, then decide on improvements/Phase 4
 
 ### 2026-01-11: Phase 2 Tested Successfully! ✅🎉
 - ✅ **Phase 2 fully tested with real Italian voice messages - IT WORKS!**
@@ -298,3 +366,5 @@ These are tasks for Federico to explore and implement:
 
 ### Write a good README TO install every thing
 - Or maybe we can implement homebrew recipe? nice!
+
+### Study also ACP to implement in future

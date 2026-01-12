@@ -19,13 +19,20 @@ model = "base"
 model_path = "./models/ggml-base.bin"
 
 [ai_model]
-# Options: "ollama", "openai", "anthropic"
-provider = "ollama"
-# Model name (e.g., "llama2", "gpt-4", "claude-3-sonnet")
-model = "llama2"
-# API endpoint for Ollama (typically http://localhost:11434)
+# Options: "ollama_local", "ollama_remote", "anthropic" (future)
+provider = "ollama_local"
+# Model name - Recommended for Italian:
+#   - llama3.2:3b (fast, good for M1 Mac)
+#   - llama3.3 (best quality, needs powerful GPU)
+#   - mistral (good balance)
+#   - jobautomation/OpenEuroLLM-Italian (specialized for Italian)
+model = "llama3.2:3b"
+# API endpoint for Ollama
+# Local: http://localhost:11434
+# Remote (Windows PC in LAN): http://192.168.1.XXX:11434
 endpoint = "http://localhost:11434"
 # Temperature for generation (0.0 - 1.0)
+# Higher = more creative, Lower = more focused
 temperature = 0.7
 
 [output]

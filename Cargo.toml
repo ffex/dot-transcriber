@@ -16,6 +16,7 @@ pretty_env_logger = "0.5"
 
 # Configuration
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 toml = "0.8"
 dotenv = "0.15"
 
@@ -30,12 +31,18 @@ whisper-rs = { version = "0.12", optional = true }
 hound = "3.5"
 symphonia = { version = "0.5", features = ["all"] }
 
-# HTTP client for file downloads
-reqwest = { version = "0.12", features = ["stream"] }
+# HTTP client for file downloads and API calls
+reqwest = { version = "0.12", features = ["stream", "json"] }
 futures-util = "0.3"
 
 # UUID for unique file names
 uuid = { version = "1.0", features = ["v4"] }
+
+# Async trait support
+async-trait = "0.1"
+
+# Date/time handling
+chrono = { version = "0.4", features = ["serde"] }
 
 [features]
 default = []

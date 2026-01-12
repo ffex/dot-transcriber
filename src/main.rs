@@ -1,6 +1,7 @@
 mod config;
 mod handlers;
 mod transcription;
+mod note_generator;
 
 use anyhow::Result;
 use config::Config;
