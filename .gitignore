@@ -28,4 +28,4 @@ dot.log
 .DS_Store
 Thumbs.db
 
-initialPrompt.md
+.claude/
