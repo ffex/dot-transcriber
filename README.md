@@ -20,30 +20,69 @@ Dot is your AI companion that listens to your voice messages on Telegram and tra
 
 - Rust 1.70+ installed
 - Telegram account
-- (Optional) Ollama installed for local AI processing
+- **CMake** (required for building whisper.cpp)
+- **ffmpeg** (required for Telegram voice message support)
+- (Optional) Ollama installed for local AI processing (Phase 3)
+
+#### Installing Dependencies
+
+**macOS**:
+```bash
+brew install cmake ffmpeg
+```
+
+**Windows** (with Chocolatey):
+```bash
+choco install cmake ffmpeg
+```
+
+**Linux** (Ubuntu/Debian):
+```bash
+sudo apt install cmake ffmpeg
+```
 
 ### Setup
 
-1. Clone and build:
+1. Download Whisper model:
 ```bash
-cargo build --release
+cd models
+curl -L https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin -o ggml-base.bin
+cd ..
 ```
 
 2. Configure your bot:
 ```bash
 cp config.example.toml config.toml
-# Edit config.toml with your settings
+# Edit config.toml with your Telegram bot token
 ```
 
-3. Set up environment variables:
+3. Build with hardware acceleration:
+
+**M1/M2/M3 Mac**:
 ```bash
-cp .env.example .env
-# Add your API keys to .env
+cargo build --release --features metal
+```
+
+**Windows/Linux with NVIDIA GPU**:
+```bash
+cargo build --release --features cuda
+```
+
+**CPU-only (any system)**:
+```bash
+cargo build --release --features cpu
 ```
 
 4. Run:
 ```bash
-cargo run
+# Mac
+cargo run --features metal
+
+# Windows NVIDIA
+cargo run --features cuda
+
+# CPU
+cargo run --features cpu
 ```
 
 ## Configuration
@@ -58,9 +97,18 @@ Key settings:
 
 ## Project Status
 
-🔴 **Phase 0**: Project Setup (In Progress)
+- ✅ **Phase 1**: Telegram Bot Foundation (Complete & Tested)
+- ✅ **Phase 2**: Audio Transcription (Complete & Tested)
+- 🔴 **Phase 3**: Note Generation with AI (Not Started)
+- 🔴 **Phase 4**: Task Extraction (Not Started)
 
-See [WhereAreWe.md](./WhereAreWe.md) for detailed development status and roadmap.
+**Current Features**:
+- 🤖 Telegram bot with Italian responses
+- 🎤 Voice message transcription (Italian)
+- 🚀 Metal/CUDA acceleration support
+- 📝 Commands: /start, /help, /status
+
+See [where-are-we.md](./where-are-we.md) for detailed development status and roadmap.
 
 ## Development
 

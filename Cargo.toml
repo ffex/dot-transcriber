@@ -22,3 +22,26 @@ dotenv = "0.15"
 # Error handling
 anyhow = "1.0"
 thiserror = "2.0"
+
+# Whisper transcription
+whisper-rs = { version = "0.12", optional = true }
+
+# Audio processing
+hound = "3.5"
+symphonia = { version = "0.5", features = ["all"] }
+
+# HTTP client for file downloads
+reqwest = { version = "0.12", features = ["stream"] }
+futures-util = "0.3"
+
+# UUID for unique file names
+uuid = { version = "1.0", features = ["v4"] }
+
+[features]
+default = []
+# For M1/M2/M3 Mac (Apple Silicon)
+metal = ["whisper-rs", "whisper-rs/metal"]
+# For Windows/Linux with NVIDIA GPU
+cuda = ["whisper-rs", "whisper-rs/cuda"]
+# For CPU-only (fallback)
+cpu = ["whisper-rs"]

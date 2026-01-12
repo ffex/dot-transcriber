@@ -1,5 +1,6 @@
 use teloxide::{prelude::*, types::Me};
 use crate::config::Config;
+use crate::transcription;
 
 /// Handler for /start command
 pub async fn start_handler(bot: Bot, msg: Message, me: Me) -> ResponseResult<()> {
@@ -60,23 +61,81 @@ pub async fn status_handler(bot: Bot, msg: Message, config: Config) -> ResponseR
 }
 
 /// Handler for audio/voice messages
-pub async fn audio_handler(bot: Bot, msg: Message, _config: Config) -> ResponseResult<()> {
+pub async fn audio_handler(bot: Bot, msg: Message, config: Config) -> ResponseResult<()> {
     log::info!("Received audio message from user {}", msg.chat.id);
 
     // Send acknowledgment
-    bot.send_message(msg.chat.id, "🎤 Messaggio vocale ricevuto! Sto elaborando...").await?;
+    let ack_msg = bot.send_message(msg.chat.id, "🎤 Messaggio vocale ricevuto! Sto trascrivendo...").await?;
 
-    // TODO: Phase 2 - Implement actual transcription
-    // For now, just acknowledge receipt
+    // Get the file info from the message
+    let file_info = if let Some(voice) = msg.voice() {
+        Some(voice.file.clone())
+    } else if let Some(audio) = msg.audio() {
+        Some(audio.file.clone())
+    } else {
+        None
+    };
 
-    let placeholder_response = "✅ Messaggio ricevuto!\n\n\
-        🚧 Funzionalità di trascrizione in arrivo (Fase 2)...\n\n\
-        Per ora sto solo ricevendo i tuoi messaggi vocali. \
-        Presto sarò in grado di trascriverli e creare note automatiche!";
+    if file_info.is_none() {
+        bot.send_message(msg.chat.id, "❌ Errore: Nessun file audio trovato nel messaggio.")
+            .await?;
+        return Ok(());
+    }
 
-    bot.send_message(msg.chat.id, placeholder_response).await?;
+    // Get full file information
+    let file_meta = file_info.unwrap();
+    let file = match bot.get_file(&file_meta.id).await {
+        Ok(f) => f,
+        Err(e) => {
+            log::error!("Failed to get file info: {}", e);
+            bot.send_message(msg.chat.id, "❌ Errore nel recupero del file audio.")
+                .await?;
+            return Ok(());
+        }
+    };
 
-    log::info!("Audio message acknowledged for user {}", msg.chat.id);
+    // Transcribe the audio
+    match transcription::transcribe_audio(
+        &bot,
+        &file,
+        &config.output.temp_dir,
+        &config.transcription.model_path,
+        &config.transcription.language,
+    ).await {
+        Ok(transcript) => {
+            // Delete acknowledgment message
+            let _ = bot.delete_message(msg.chat.id, ack_msg.id).await;
+
+            // Send transcription result
+            let response = format!(
+                "✅ Trascrizione completata!\n\n📝 Testo:\n{}",
+                transcript
+            );
+            bot.send_message(msg.chat.id, response).await?;
+
+            log::info!("Transcription successful for user {}: {} chars",
+                       msg.chat.id, transcript.len());
+        }
+        Err(e) => {
+            log::error!("Transcription failed: {}", e);
+
+            // Delete acknowledgment message
+            let _ = bot.delete_message(msg.chat.id, ack_msg.id).await;
+
+            let error_msg = format!(
+                "❌ Errore nella trascrizione.\n\n\
+                Dettagli: {}\n\n\
+                💡 Suggerimenti:\n\
+                - Verifica che il modello Whisper sia scaricato in: {}\n\
+                - Controlla i log per maggiori dettagli\n\
+                - Usa /status per verificare la configurazione",
+                e,
+                config.transcription.model_path
+            );
+            bot.send_message(msg.chat.id, error_msg).await?;
+        }
+    }
+
     Ok(())
 }
 

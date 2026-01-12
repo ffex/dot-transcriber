@@ -11,9 +11,10 @@ Dot is an AI assistant Telegram bot that helps transform voice messages into str
 
 ## Technology Stack
 - **Language**: Rust
-- **Bot**: Telegram Bot API
-- **Transcription**: TBD (OpenAI Whisper API, local Whisper, or alternatives)
-- **AI Processing**: Ollama (local) or API-based models (OpenAI, Anthropic)
+- **Bot**: Telegram Bot API (teloxide)
+- **Transcription**: whisper-rs (local whisper.cpp with Metal/CUDA acceleration)
+- **Audio Processing**: symphonia + hound
+- **AI Processing**: Ollama (local) or API-based models (OpenAI, Anthropic) - Coming in Phase 3
 - **Output Format**: Markdown (.md)
 
 ---
@@ -47,7 +48,7 @@ Dot is an AI assistant Telegram bot that helps transform voice messages into str
 ---
 
 ### Phase 2: Audio Transcription
-**Status**: 🔴 Not Started
+**Status**: 🟢 Complete & Tested ✅
 
 **Goals**:
 - Research transcription options
@@ -55,17 +56,26 @@ Dot is an AI assistant Telegram bot that helps transform voice messages into str
 - Handle various audio formats
 
 **Tasks**:
-- [ ] Research transcription options:
-  - OpenAI Whisper API (cloud)
-  - Local Whisper (whisper.cpp, faster-whisper)
-  - Other APIs (AssemblyAI, Deepgram)
-- [ ] Choose transcription solution
-- [ ] Implement transcription integration
-- [ ] Add Italian language support
-- [ ] Handle audio format conversions if needed
-- [ ] Add error handling for transcription failures
+- [x] Research transcription options (whisper.cpp, faster-whisper, OpenAI API)
+- [x] Choose transcription solution (whisper-rs with local whisper.cpp)
+- [x] Install CMake build dependency
+- [x] Add whisper-rs with Metal/CUDA feature flags
+- [x] Implement audio file download from Telegram
+- [x] Implement audio format conversion (any format → 16kHz mono WAV)
+- [x] Integrate whisper-rs transcription
+- [x] Add Italian language support
+- [x] Download Whisper base model (141MB)
+- [x] Add error handling for transcription failures
+- [x] Update handlers to use transcription
+- [x] Build with Metal acceleration for M1 Mac
+- [x] Debug and fix Opus codec support (Telegram voice format)
+- [x] Add ffmpeg fallback for unsupported codecs
+- [x] Test successfully with real Italian voice messages
 
 **Dependencies**: Phase 1 complete
+
+**Completed**: 2026-01-11
+**Tested**: 2026-01-11 ✅
 
 ---
 
@@ -111,50 +121,95 @@ Dot is an AI assistant Telegram bot that helps transform voice messages into str
 
 ## Current Status
 
-**Active Phase**: Phase 1 Complete ✅ - Ready for Phase 2
+**Active Phase**: Phase 2 Complete ✅ - Ready for Phase 3
 **Last Updated**: 2026-01-11
 
 ### What We Have
 - ✅ Rust project initialized (`dot_transcriber`)
-- ✅ Project tracking documents (WhereAreWe.md, ClaudePrompts.md, AIPrompts.md)
+- ✅ Project tracking documents (where-are-we.md, ClaudePrompts.md, AIPrompts.md)
 - ✅ Configuration system (config.toml + .env support)
 - ✅ Telegram bot fully functional with teloxide
 - ✅ Commands: /start, /help, /status (all in Italian)
 - ✅ Audio message detection (voice messages & audio files)
 - ✅ Message routing with dptree
-- ✅ Modular code structure (main.rs, config.rs, handlers.rs)
+- ✅ Modular code structure (main.rs, config.rs, handlers.rs, transcription.rs)
 - ✅ Logging system with pretty_env_logger
-- ✅ Bot tested and working!
+- ✅ **Audio transcription working!**
+  - Downloads audio from Telegram
+  - Converts any format to WAV
+  - Transcribes with Whisper (Italian)
+  - Returns transcribed text
+- ✅ Whisper model downloaded (ggml-base.bin, 141MB)
+- ✅ Metal acceleration for M1 Mac
 
 ### What We're Working On
-- Preparing for Phase 2: Audio Transcription
-- Code improvements and security enhancements
+- ✅ Transcription tested and working!
+- Preparing for Phase 3: AI Note Generation
 
 ### Next Steps
-1. Implement user authentication (only authorized users can use bot)
-2. Research and choose transcription service (Whisper API vs local)
-3. Implement audio file download from Telegram
-4. Integrate transcription service
-5. Begin Phase 2: Audio Transcription
+1. ✅ ~~Test transcription with Italian voice messages~~ **DONE!**
+2. Implement user authentication (security enhancement)
+3. Begin Phase 3: AI-powered note generation with Ollama/API
+4. Design note format and structure
+5. Implement markdown note generation
 
 ---
 
 ## Configuration Needs
 
 **Required Secrets**:
-- `TELEGRAM_BOT_TOKEN`: From BotFather
-- `OPENAI_API_KEY`: (if using Whisper API or GPT)
-- `ANTHROPIC_API_KEY`: (if using Claude API)
+- `TELEGRAM_BOT_TOKEN`: From BotFather (required) ✅
+
+**Phase 3 Secrets** (not yet needed):
+- `OPENAI_API_KEY`: If using GPT models
+- `ANTHROPIC_API_KEY`: If using Claude models
+
+**System Dependencies**:
+- CMake: For building whisper.cpp bindings ✅
+- ffmpeg: For Telegram voice (Opus codec) support ✅
 
 **Configuration Options**:
-- Output directory for notes
-- Model selection (local/cloud)
-- Language settings
-- Note templates
+- Whisper model path: `./models/ggml-base.bin` ✅
+- Output directory for notes: `./output/notes`
+- Temporary directory: `./temp` ✅
+- Language: Italian (`it`) ✅
+- Task extraction: enabled/disabled
+- Note templates (Phase 3)
 
 ---
 
 ## Notes & Decisions Log
+
+### 2026-01-11: Phase 2 Tested Successfully! ✅🎉
+- ✅ **Phase 2 fully tested with real Italian voice messages - IT WORKS!**
+- **Issue discovered & solved**: Telegram uses Opus codec in OGG container
+  - Symphonia doesn't support Opus decoder out of the box
+  - **Solution**: Implemented ffmpeg fallback for unsupported codecs
+  - Pipeline now: Symphonia (if supported) → ffmpeg fallback → Whisper
+- **Final audio pipeline**:
+  - Download from Telegram (OGG Opus format)
+  - Detect codec and try Symphonia first
+  - If codec unsupported (like Opus), fall back to ffmpeg
+  - Convert to 16kHz mono WAV
+  - Transcribe with Whisper (Italian)
+  - Return transcribed text to user
+- **Dependencies verified**:
+  - CMake: Required for whisper.cpp compilation ✅
+  - ffmpeg: Required for Opus/Telegram voice support ✅
+- **Performance**: Fast transcription with Metal acceleration on M1
+- **Next**: Ready for Phase 3 (AI-powered note generation)!
+
+### 2026-01-11: Phase 2 Complete - Transcription Implementation
+- ✅ **Phase 2 implementation completed**
+- **Decision: Local Whisper** (whisper-rs) over OpenAI API
+  - Reasoning: Free, private, works offline, good quality with GPU acceleration
+  - Cost analysis: API would cost ~$11/month for 1hr/day usage
+- **Cross-platform support**:
+  - M1 Mac: Built with Metal acceleration (`cargo build --features metal`)
+  - Windows NVIDIA: Use CUDA (`cargo build --features cuda`)
+  - CPU fallback available for other systems
+- **Whisper model**: ggml-base.bin (141MB, good balance for Italian)
+- **Build requirements**: CMake needed for compiling whisper.cpp bindings
 
 ### 2026-01-11: Phase 1 Complete - Bot Foundation Ready
 - ✅ **Phase 1 completed and tested successfully**
@@ -180,11 +235,12 @@ Dot is an AI assistant Telegram bot that helps transform voice messages into str
 
 ## Questions & Open Items
 
-1. **Transcription Choice**: Local Whisper vs API? (Consider: cost, speed, quality, privacy)
-2. **Model Choice**: Ollama local vs cloud API? (Consider: similar tradeoffs)
+1. ~~**Transcription Choice**: Local Whisper vs API?~~ ✅ **RESOLVED**: Local whisper-rs
+2. **Model Choice**: Ollama local vs cloud API for note generation? (Phase 3)
 3. **Note Organization**: Single file per recording or aggregate by date/topic?
 4. **Note Format**: What frontmatter? Tags, dates, categories?
 5. **Deployment**: Run on personal server, cloud VPS, or local machine?
+6. **Security**: How to restrict bot access to specific users?
 
 ---
 
@@ -193,7 +249,9 @@ Dot is an AI assistant Telegram bot that helps transform voice messages into str
 - [Telegram Bot API Docs](https://core.telegram.org/bots/api)
 - [teloxide - Rust Telegram Bot Framework](https://github.com/teloxide/teloxide)
 - [dptree - Declarative handler trees](https://github.com/teloxide/dptree)
-- [Whisper by OpenAI](https://openai.com/research/whisper)
+- [whisper-rs - Rust bindings for whisper.cpp](https://github.com/tazz4843/whisper-rs)
+- [whisper.cpp - C++ port of Whisper](https://github.com/ggml-org/whisper.cpp)
+- [Whisper models on HuggingFace](https://huggingface.co/ggerganov/whisper.cpp)
 - [Ollama](https://ollama.ai/)
 - [Obsidian Markdown Format](https://help.obsidian.md/Editing+and+formatting/Basic+formatting+syntax)
 
@@ -209,6 +267,21 @@ These are tasks for Federico to explore and implement:
   - Key concepts: handler trees, filters, endpoints
   - See how we use it in `src/main.rs` lines 46-66
 
+- [ ] **Study Cargo features**: Understand `cargo build --features metal`
+  - What are Cargo features and how do they work?
+  - Why we use features for Metal/CUDA (conditional compilation)
+  - How it enables different hardware acceleration paths
+  - Resource: [Cargo Features Documentation](https://doc.rust-lang.org/cargo/reference/features.html)
+  - See our implementation in `Cargo.toml` lines 37-44
+
+- [ ] **Study whisper-rs**: Understand the transcription library
+  - What is whisper-rs and how does it work?
+  - How does it bind to whisper.cpp (C++ library)?
+  - Why we chose local whisper over API
+  - How Metal/CUDA acceleration works
+  - Resource: [whisper-rs GitHub](https://github.com/tazz4843/whisper-rs)
+  - See our implementation in `src/transcription.rs`
+
 ### 🛠️ Code Improvements
 - [ ] **Remove camel case**: Review code for camelCase variables and convert to snake_case
   - Rust convention is `snake_case` for variables and functions
@@ -222,3 +295,6 @@ These are tasks for Federico to explore and implement:
   - Reject unauthorized users with polite message
   - Consider: How to get your Telegram user ID? (Bot can log it, or use @userinfobot)
   - Implementation location: Create new filter in dptree chain or add check in handlers
+
+### Write a good README TO install every thing
+- Or maybe we can implement homebrew recipe? nice!

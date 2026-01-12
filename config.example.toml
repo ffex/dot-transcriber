@@ -8,13 +8,15 @@ bot_token = "YOUR_BOT_TOKEN_HERE"
 poll_interval = 2
 
 [transcription]
-# Options: "whisper_api", "whisper_local", "other"
-service = "whisper_api"
+# Options: "whisper_local", "whisper_api" (not yet implemented)
+service = "whisper_local"
 # Language code (ISO 639-1)
 language = "it"
-# For whisper_api: your OpenAI API key (or set via OPENAI_API_KEY env var)
-# For whisper_local: path to model file
-model = "whisper-1"
+# Model name (for reference only)
+model = "base"
+# Path to Whisper model file (download from: https://huggingface.co/ggerganov/whisper.cpp)
+# Recommended for Italian: ggml-base.bin (142MB) or ggml-small.bin (466MB)
+model_path = "./models/ggml-base.bin"
 
 [ai_model]
 # Options: "ollama", "openai", "anthropic"

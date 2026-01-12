@@ -1,5 +1,6 @@
 mod config;
 mod handlers;
+mod transcription;
 
 use anyhow::Result;
 use config::Config;

@@ -10,6 +10,9 @@ config.toml
 /output
 /temp
 
+# Whisper models (large files)
+/models
+
 # Logs
 *.log
 dot.log

@@ -24,6 +24,7 @@ pub struct TranscriptionConfig {
     pub service: String,
     pub language: String,
     pub model: String,
+    pub model_path: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
