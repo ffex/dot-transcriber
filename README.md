@@ -1,6 +1,7 @@
 # Dot - Voice-to-Notes Telegram Bot
 
 🎤 Transform voice messages into structured markdown notes and actionable tasks.
+Develop as experiment with Claude Code!
 
 ## What is Dot?
 
