@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use chrono::{DateTime, Utc};
 
+use crate::config::{CorrectionConfig, NotesGenerationConfig};
+
 /// Represents a generated note
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Note {
@@ -98,14 +100,27 @@ pub struct OllamaProvider {
     endpoint: String,
     model: String,
     client: reqwest::Client,
+    correction_temperature: f32,
+    correction_top_p: f32,
+    notes_temperature: f32,
+    notes_top_p: f32,
 }
 
 impl OllamaProvider {
-    pub fn new(endpoint: String, model: String) -> Self {
+    pub fn new(
+        endpoint: String,
+        model: String,
+        correction: &CorrectionConfig,
+        notes_generation: &NotesGenerationConfig,
+    ) -> Self {
         Self {
             endpoint,
             model,
             client: reqwest::Client::new(),
+            correction_temperature: correction.temperature,
+            correction_top_p: correction.top_p,
+            notes_temperature: notes_generation.temperature,
+            notes_top_p: notes_generation.top_p,
         }
     }
 
@@ -188,8 +203,8 @@ Rispondi SOLO con il JSON, senza testo aggiuntivo prima o dopo."#
             ],
             "stream": false,
             "options": {
-                "temperature": 0.3,  // Lower temp for more precise corrections
-                "top_p": 0.9
+                "temperature": self.correction_temperature,
+                "top_p": self.correction_top_p
             }
         });
 
@@ -243,8 +258,8 @@ impl AiProvider for OllamaProvider {
             "stream": false,
             "format": "json",
             "options": {
-                "temperature": 0.7,
-                "top_p": 0.9
+                "temperature": self.notes_temperature,
+                "top_p": self.notes_top_p
             }
         });
 

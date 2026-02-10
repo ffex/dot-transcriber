@@ -7,6 +7,8 @@ use std::path::Path;
 pub struct Config {
     pub telegram: TelegramConfig,
     pub transcription: TranscriptionConfig,
+    pub correction: CorrectionConfig,
+    pub notes_generation: NotesGenerationConfig,
     pub ai_model: AiModelConfig,
     pub output: OutputConfig,
     pub features: FeaturesConfig,
@@ -21,18 +23,44 @@ pub struct TelegramConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct TranscriptionConfig {
-    pub service: String,
+    pub provider: String,
     pub language: String,
-    pub model: String,
-    pub model_path: String,
+    #[serde(default)]
+    pub model_path: Option<String>,
+    #[serde(default)]
+    pub api_key_env: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
 }
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct CorrectionConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_correction_temperature")]
+    pub temperature: f32,
+    #[serde(default = "default_top_p")]
+    pub top_p: f32,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct NotesGenerationConfig {
+    #[serde(default = "default_notes_temperature")]
+    pub temperature: f32,
+    #[serde(default = "default_top_p")]
+    pub top_p: f32,
+}
+
+fn default_true() -> bool { true }
+fn default_correction_temperature() -> f32 { 0.3 }
+fn default_notes_temperature() -> f32 { 0.7 }
+fn default_top_p() -> f32 { 0.9 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct AiModelConfig {
     pub provider: String,
     pub model: String,
     pub endpoint: String,
-    pub temperature: f32,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -96,15 +124,23 @@ mod tests {
             poll_interval = 2
 
             [transcription]
-            service = "whisper_api"
+            provider = "whisper_local"
             language = "it"
-            model = "whisper-1"
+            model_path = "./models/ggml-large-v3.bin"
+
+            [correction]
+            enabled = true
+            temperature = 0.3
+            top_p = 0.9
+
+            [notes_generation]
+            temperature = 0.7
+            top_p = 0.9
 
             [ai_model]
-            provider = "ollama"
-            model = "llama2"
+            provider = "ollama_local"
+            model = "llama3.2:3b"
             endpoint = "http://localhost:11434"
-            temperature = 0.7
 
             [output]
             notes_dir = "./output/notes"
@@ -124,5 +160,62 @@ mod tests {
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(config.telegram.bot_token, "test_token");
         assert_eq!(config.transcription.language, "it");
+        assert_eq!(config.transcription.provider, "whisper_local");
+        assert_eq!(config.transcription.model_path.as_deref(), Some("./models/ggml-large-v3.bin"));
+        assert_eq!(config.correction.enabled, true);
+        assert_eq!(config.correction.temperature, 0.3);
+        assert_eq!(config.notes_generation.temperature, 0.7);
+    }
+
+    #[test]
+    fn test_config_groq_provider() {
+        let toml_str = r#"
+            [telegram]
+            bot_token = "test_token"
+            poll_interval = 2
+
+            [transcription]
+            provider = "groq"
+            language = "it"
+            api_key_env = "GROQ_API_KEY"
+            model = "whisper-large-v3-turbo"
+
+            [correction]
+            enabled = false
+
+            [notes_generation]
+            temperature = 0.5
+
+            [ai_model]
+            provider = "ollama_local"
+            model = "llama3.2:3b"
+            endpoint = "http://localhost:11434"
+
+            [output]
+            notes_dir = "./output/notes"
+            tasks_dir = "./output/tasks"
+            temp_dir = "./temp"
+
+            [features]
+            enable_task_extraction = true
+            enable_auto_tags = true
+            max_audio_size_mb = 20
+
+            [logging]
+            level = "info"
+            log_file = "./dot.log"
+        "#;
+
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.transcription.provider, "groq");
+        assert_eq!(config.transcription.api_key_env.as_deref(), Some("GROQ_API_KEY"));
+        assert_eq!(config.transcription.model.as_deref(), Some("whisper-large-v3-turbo"));
+        assert_eq!(config.transcription.model_path, None);
+        assert_eq!(config.correction.enabled, false);
+        // Check defaults applied
+        assert_eq!(config.correction.temperature, 0.3);
+        assert_eq!(config.correction.top_p, 0.9);
+        assert_eq!(config.notes_generation.temperature, 0.5);
+        assert_eq!(config.notes_generation.top_p, 0.9);
     }
 }

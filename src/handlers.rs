@@ -51,7 +51,7 @@ pub async fn status_handler(bot: Bot, msg: Message, config: Config) -> ResponseR
         📁 Directory note: {}\n\
         🔧 Task extraction: {}\n\n\
         Pronto a ricevere messaggi vocali!",
-        config.transcription.service,
+        config.transcription.provider,
         config.ai_model.provider,
         config.output.notes_dir,
         if config.features.enable_task_extraction { "Abilitata" } else { "Disabilitata" }
@@ -95,41 +95,55 @@ pub async fn audio_handler(bot: Bot, msg: Message, config: Config) -> ResponseRe
         }
     };
 
+    // Create transcription provider
+    let provider = match transcription::create_transcription_provider(&config.transcription) {
+        Ok(p) => p,
+        Err(e) => {
+            log::error!("Failed to create transcription provider: {}", e);
+            let _ = bot.delete_message(msg.chat.id, ack_msg.id).await;
+            bot.send_message(msg.chat.id, format!(
+                "❌ Errore configurazione trascrizione: {}", e
+            )).await?;
+            return Ok(());
+        }
+    };
+
     // Transcribe the audio
-    match transcription::transcribe_audio(
-        &bot,
-        &file,
-        &config.output.temp_dir,
-        &config.transcription.model_path,
-        &config.transcription.language,
-    ).await {
+    match provider.transcribe(&bot, &file, &config.output.temp_dir).await {
         Ok(raw_transcript) => {
             log::info!("Transcription successful for user {}: {} chars",
                        msg.chat.id, raw_transcript.len());
-
-            // Update status message - cleanup phase
-            let _ = bot.edit_message_text(
-                msg.chat.id,
-                ack_msg.id,
-                "✅ Trascritto! Correggo eventuali errori..."
-            ).await;
 
             // Initialize Ollama provider
             let ollama = OllamaProvider::new(
                 config.ai_model.endpoint.clone(),
                 config.ai_model.model.clone(),
+                &config.correction,
+                &config.notes_generation,
             );
 
-            // Step 1: Clean the transcription
-            let cleaned_transcript = match ollama.cleanup_transcription(&raw_transcript).await {
-                Ok(cleaned) => {
-                    log::info!("Transcription cleaned successfully");
-                    cleaned
+            // Step 1: Clean the transcription (if enabled)
+            let cleaned_transcript = if config.correction.enabled {
+                // Update status message - cleanup phase
+                let _ = bot.edit_message_text(
+                    msg.chat.id,
+                    ack_msg.id,
+                    "✅ Trascritto! Correggo eventuali errori..."
+                ).await;
+
+                match ollama.cleanup_transcription(&raw_transcript).await {
+                    Ok(cleaned) => {
+                        log::info!("Transcription cleaned successfully");
+                        cleaned
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to clean transcription, using raw: {}", e);
+                        raw_transcript.clone()
+                    }
                 }
-                Err(e) => {
-                    log::warn!("Failed to clean transcription, using raw: {}", e);
-                    raw_transcript.clone() // Fallback to raw if cleanup fails
-                }
+            } else {
+                log::info!("Correction disabled, using raw transcript");
+                raw_transcript.clone()
             };
 
             // Update status message - note generation phase
@@ -209,11 +223,11 @@ pub async fn audio_handler(bot: Bot, msg: Message, config: Config) -> ResponseRe
                 "❌ Errore nella trascrizione.\n\n\
                 Dettagli: {}\n\n\
                 💡 Suggerimenti:\n\
-                - Verifica che il modello Whisper sia scaricato in: {}\n\
+                - Controlla la configurazione del provider '{}'\n\
                 - Controlla i log per maggiori dettagli\n\
                 - Usa /status per verificare la configurazione",
                 e,
-                config.transcription.model_path
+                config.transcription.provider
             );
             bot.send_message(msg.chat.id, error_msg).await?;
         }

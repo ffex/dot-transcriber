@@ -7,11 +7,153 @@ use std::fs::File;
 use std::io::Write;
 use futures_util::StreamExt;
 
+use crate::config::TranscriptionConfig;
+
 #[cfg(feature = "whisper-rs")]
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
+/// Trait for transcription providers
+#[async_trait::async_trait]
+pub trait TranscriptionProvider: Send + Sync {
+    async fn transcribe(&self, bot: &Bot, file: &TelegramFile, temp_dir: &str) -> Result<String>;
+}
+
+/// Factory function to create the appropriate transcription provider
+pub fn create_transcription_provider(config: &TranscriptionConfig) -> Result<Box<dyn TranscriptionProvider>> {
+    match config.provider.as_str() {
+        "whisper_local" => {
+            let model_path = config.model_path.as_deref()
+                .context("model_path is required for whisper_local provider")?;
+            Ok(Box::new(WhisperLocalProvider {
+                model_path: model_path.to_string(),
+                language: config.language.clone(),
+            }))
+        }
+        "groq" => {
+            let api_key_env = config.api_key_env.as_deref()
+                .unwrap_or("GROQ_API_KEY");
+            let api_key = std::env::var(api_key_env)
+                .with_context(|| format!("Environment variable '{}' not set. Required for Groq provider.", api_key_env))?;
+            let model = config.model.as_deref()
+                .unwrap_or("whisper-large-v3-turbo")
+                .to_string();
+            Ok(Box::new(GroqProvider {
+                api_key,
+                model,
+                language: config.language.clone(),
+            }))
+        }
+        other => anyhow::bail!("Unknown transcription provider: '{}'. Use 'whisper_local' or 'groq'.", other),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// WhisperLocalProvider
+// ---------------------------------------------------------------------------
+
+pub struct WhisperLocalProvider {
+    model_path: String,
+    language: String,
+}
+
+#[async_trait::async_trait]
+impl TranscriptionProvider for WhisperLocalProvider {
+    async fn transcribe(&self, bot: &Bot, file: &TelegramFile, temp_dir: &str) -> Result<String> {
+        // Download audio from Telegram
+        let audio_path = download_audio_file(bot, file, temp_dir).await?;
+
+        // Convert to WAV format
+        let wav_path = convert_audio_to_wav(&audio_path)
+            .context("Failed to convert audio to WAV")?;
+
+        // Transcribe
+        let transcript = transcribe_with_whisper(&wav_path, &self.model_path, &self.language)?;
+
+        // Clean up temporary files
+        if let Err(e) = std::fs::remove_file(&audio_path) {
+            log::warn!("Failed to remove temporary audio file: {}", e);
+        }
+        if let Err(e) = std::fs::remove_file(&wav_path) {
+            log::warn!("Failed to remove temporary WAV file: {}", e);
+        }
+
+        Ok(transcript)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GroqProvider
+// ---------------------------------------------------------------------------
+
+pub struct GroqProvider {
+    api_key: String,
+    model: String,
+    language: String,
+}
+
+#[async_trait::async_trait]
+impl TranscriptionProvider for GroqProvider {
+    async fn transcribe(&self, bot: &Bot, file: &TelegramFile, temp_dir: &str) -> Result<String> {
+        // Download audio from Telegram (keep as OGG — Groq accepts it)
+        let audio_path = download_audio_file(bot, file, temp_dir).await?;
+
+        let file_bytes = std::fs::read(&audio_path)
+            .context("Failed to read downloaded audio file")?;
+
+        let file_name = audio_path.file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+
+        let file_part = reqwest::multipart::Part::bytes(file_bytes)
+            .file_name(file_name)
+            .mime_str("audio/ogg")?;
+
+        let form = reqwest::multipart::Form::new()
+            .part("file", file_part)
+            .text("model", self.model.clone())
+            .text("language", self.language.clone())
+            .text("response_format", "json");
+
+        let client = reqwest::Client::new();
+        let response = client
+            .post("https://api.groq.com/openai/v1/audio/transcriptions")
+            .bearer_auth(&self.api_key)
+            .multipart(form)
+            .send()
+            .await
+            .context("Failed to send request to Groq API")?;
+
+        // Clean up temp file
+        if let Err(e) = std::fs::remove_file(&audio_path) {
+            log::warn!("Failed to remove temporary audio file: {}", e);
+        }
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            anyhow::bail!("Groq API error ({}): {}", status, error_text);
+        }
+
+        let response_json: serde_json::Value = response.json().await
+            .context("Failed to parse Groq response")?;
+
+        let text = response_json["text"]
+            .as_str()
+            .context("No 'text' field in Groq response")?
+            .to_string();
+
+        log::info!("Groq transcription complete: {} characters", text.len());
+        Ok(text)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Shared helpers (download, convert, whisper)
+// ---------------------------------------------------------------------------
+
 /// Download audio file from Telegram
-pub async fn download_audio_file(
+async fn download_audio_file(
     bot: &Bot,
     file: &TelegramFile,
     temp_dir: &str,
@@ -71,7 +213,7 @@ fn convert_with_ffmpeg(input_path: &Path, output_path: &Path) -> Result<()> {
 }
 
 /// Convert audio file to WAV format (16kHz, mono) for Whisper
-pub fn convert_audio_to_wav(input_path: &Path) -> Result<PathBuf> {
+fn convert_audio_to_wav(input_path: &Path) -> Result<PathBuf> {
     use symphonia::core::audio::SampleBuffer;
     use symphonia::core::codecs::DecoderOptions;
     use symphonia::core::formats::FormatOptions;
@@ -256,7 +398,7 @@ fn resample_audio(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
 
 /// Transcribe audio file using Whisper
 #[cfg(feature = "whisper-rs")]
-pub fn transcribe_with_whisper(wav_path: &Path, model_path: &str, language: &str) -> Result<String> {
+fn transcribe_with_whisper(wav_path: &Path, model_path: &str, language: &str) -> Result<String> {
     log::info!("Transcribing audio with Whisper model: {}", model_path);
 
     // Load Whisper model
@@ -310,35 +452,6 @@ pub fn transcribe_with_whisper(wav_path: &Path, model_path: &str, language: &str
 }
 
 #[cfg(not(feature = "whisper-rs"))]
-pub fn transcribe_with_whisper(_wav_path: &Path, _model_path: &str, _language: &str) -> Result<String> {
+fn transcribe_with_whisper(_wav_path: &Path, _model_path: &str, _language: &str) -> Result<String> {
     anyhow::bail!("Whisper feature not enabled. Build with --features metal (Mac) or --features cuda (Windows)")
-}
-
-/// Main transcription function
-pub async fn transcribe_audio(
-    bot: &Bot,
-    file: &TelegramFile,
-    temp_dir: &str,
-    model_path: &str,
-    language: &str,
-) -> Result<String> {
-    // Download audio from Telegram
-    let audio_path = download_audio_file(bot, file, temp_dir).await?;
-
-    // Convert to WAV format
-    let wav_path = convert_audio_to_wav(&audio_path)
-        .context("Failed to convert audio to WAV")?;
-
-    // Transcribe
-    let transcript = transcribe_with_whisper(&wav_path, model_path, language)?;
-
-    // Clean up temporary files
-    if let Err(e) = std::fs::remove_file(&audio_path) {
-        log::warn!("Failed to remove temporary audio file: {}", e);
-    }
-    if let Err(e) = std::fs::remove_file(&wav_path) {
-        log::warn!("Failed to remove temporary WAV file: {}", e);
-    }
-
-    Ok(transcript)
 }

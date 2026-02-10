@@ -32,7 +32,7 @@ hound = "3.5"
 symphonia = { version = "0.5", features = ["all"] }
 
 # HTTP client for file downloads and API calls
-reqwest = { version = "0.12", features = ["stream", "json"] }
+reqwest = { version = "0.12", features = ["stream", "json", "multipart"] }
 futures-util = "0.3"
 
 # UUID for unique file names
