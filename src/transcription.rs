@@ -43,7 +43,21 @@ pub fn create_transcription_provider(config: &TranscriptionConfig) -> Result<Box
                 language: config.language.clone(),
             }))
         }
-        other => anyhow::bail!("Unknown transcription provider: '{}'. Use 'whisper_local' or 'groq'.", other),
+        "deepgram" => {
+            let api_key_env = config.api_key_env.as_deref()
+                .unwrap_or("DEEPGRAM_API_KEY");
+            let api_key = std::env::var(api_key_env)
+                .with_context(|| format!("Environment variable '{}' not set. Required for Deepgram provider.", api_key_env))?;
+            let model = config.model.as_deref()
+                .unwrap_or("nova-2")
+                .to_string();
+            Ok(Box::new(DeepgramProvider {
+                api_key,
+                model,
+                language: config.language.clone(),
+            }))
+        }
+        other => anyhow::bail!("Unknown transcription provider: '{}'. Use 'whisper_local', 'groq', or 'deepgram'.", other),
     }
 }
 
@@ -144,6 +158,64 @@ impl TranscriptionProvider for GroqProvider {
             .to_string();
 
         log::info!("Groq transcription complete: {} characters", text.len());
+        Ok(text)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DeepgramProvider
+// ---------------------------------------------------------------------------
+
+pub struct DeepgramProvider {
+    api_key: String,
+    model: String,
+    language: String,
+}
+
+#[async_trait::async_trait]
+impl TranscriptionProvider for DeepgramProvider {
+    async fn transcribe(&self, bot: &Bot, file: &TelegramFile, temp_dir: &str) -> Result<String> {
+        let audio_path = download_audio_file(bot, file, temp_dir).await?;
+
+        let file_bytes = std::fs::read(&audio_path)
+            .context("Failed to read downloaded audio file")?;
+
+        // Clean up temp file early
+        if let Err(e) = std::fs::remove_file(&audio_path) {
+            log::warn!("Failed to remove temporary audio file: {}", e);
+        }
+
+        let url = format!(
+            "https://api.deepgram.com/v1/listen?model={}&language={}&smart_format=true",
+            self.model, self.language
+        );
+
+        let client = reqwest::Client::new();
+        let response = client
+            .post(&url)
+            .header("Authorization", format!("Token {}", self.api_key))
+            .header("Content-Type", "audio/ogg")
+            .body(file_bytes)
+            .send()
+            .await
+            .context("Failed to send request to Deepgram API")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            anyhow::bail!("Deepgram API error ({}): {}", status, error_text);
+        }
+
+        let response_json: serde_json::Value = response.json().await
+            .context("Failed to parse Deepgram response")?;
+
+        // Deepgram returns transcript in results.channels[0].alternatives[0].transcript
+        let text = response_json["results"]["channels"][0]["alternatives"][0]["transcript"]
+            .as_str()
+            .context("No transcript in Deepgram response")?
+            .to_string();
+
+        log::info!("Deepgram transcription complete: {} characters", text.len());
         Ok(text)
     }
 }

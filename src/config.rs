@@ -168,6 +168,53 @@ mod tests {
     }
 
     #[test]
+    fn test_config_deepgram_provider() {
+        let toml_str = r#"
+            [telegram]
+            bot_token = "test_token"
+            poll_interval = 2
+
+            [transcription]
+            provider = "deepgram"
+            language = "it"
+            api_key_env = "DEEPGRAM_API_KEY"
+            model = "nova-2"
+
+            [correction]
+            enabled = true
+
+            [notes_generation]
+            temperature = 0.7
+
+            [ai_model]
+            provider = "ollama_local"
+            model = "llama3.2:3b"
+            endpoint = "http://localhost:11434"
+
+            [output]
+            notes_dir = "./output/notes"
+            tasks_dir = "./output/tasks"
+            temp_dir = "./temp"
+
+            [features]
+            enable_task_extraction = true
+            enable_auto_tags = true
+            max_audio_size_mb = 20
+
+            [logging]
+            level = "info"
+            log_file = "./dot.log"
+        "#;
+
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.transcription.provider, "deepgram");
+        assert_eq!(config.transcription.api_key_env.as_deref(), Some("DEEPGRAM_API_KEY"));
+        assert_eq!(config.transcription.model.as_deref(), Some("nova-2"));
+        assert_eq!(config.transcription.model_path, None);
+        assert_eq!(config.ai_model.endpoint, "http://localhost:11434");
+    }
+
+    #[test]
     fn test_config_groq_provider() {
         let toml_str = r#"
             [telegram]
