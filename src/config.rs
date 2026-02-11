@@ -7,6 +7,8 @@ use std::path::Path;
 pub struct Config {
     pub telegram: TelegramConfig,
     pub transcription: TranscriptionConfig,
+    pub correction: CorrectionConfig,
+    pub notes_generation: NotesGenerationConfig,
     pub ai_model: AiModelConfig,
     pub output: OutputConfig,
     pub features: FeaturesConfig,
@@ -28,11 +30,23 @@ pub struct TranscriptionConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+pub struct CorrectionConfig {
+    pub enabled: bool,
+    pub temperature: f32,
+    pub top_p: f32,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct NotesGenerationConfig {
+    pub temperature: f32,
+    pub top_p: f32,
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct AiModelConfig {
     pub provider: String,
     pub model: String,
     pub endpoint: String,
-    pub temperature: f32,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -99,12 +113,21 @@ mod tests {
             service = "whisper_api"
             language = "it"
             model = "whisper-1"
+            model_path = "./models/ggml-large-v3.bin"
+
+            [correction]
+            enabled = true
+            temperature = 0.3
+            top_p = 0.9
+
+            [notes_generation]
+            temperature = 0.7
+            top_p = 0.9
 
             [ai_model]
             provider = "ollama"
             model = "llama2"
             endpoint = "http://localhost:11434"
-            temperature = 0.7
 
             [output]
             notes_dir = "./output/notes"
@@ -124,5 +147,8 @@ mod tests {
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(config.telegram.bot_token, "test_token");
         assert_eq!(config.transcription.language, "it");
+        assert!(config.correction.enabled);
+        assert_eq!(config.correction.temperature, 0.3);
+        assert_eq!(config.notes_generation.temperature, 0.7);
     }
 }

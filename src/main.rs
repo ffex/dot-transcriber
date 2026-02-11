@@ -1,7 +1,9 @@
 mod config;
 mod handlers;
-mod transcription;
 mod note_generator;
+mod ollama;
+mod tools;
+mod transcription;
 
 use anyhow::Result;
 use config::Config;

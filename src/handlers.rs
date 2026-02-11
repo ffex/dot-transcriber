@@ -1,7 +1,7 @@
 use teloxide::{prelude::*, types::Me};
 use crate::config::Config;
 use crate::transcription;
-use crate::note_generator::{AiProvider, OllamaProvider};
+use crate::note_generator::NoteGeneratorAgent;
 
 /// Handler for /start command
 pub async fn start_handler(bot: Bot, msg: Message, me: Me) -> ResponseResult<()> {
@@ -107,93 +107,56 @@ pub async fn audio_handler(bot: Bot, msg: Message, config: Config) -> ResponseRe
             log::info!("Transcription successful for user {}: {} chars",
                        msg.chat.id, raw_transcript.len());
 
-            // Update status message - cleanup phase
+            // Update status message
             let _ = bot.edit_message_text(
                 msg.chat.id,
                 ack_msg.id,
-                "✅ Trascritto! Correggo eventuali errori..."
+                "✅ Trascritto! Genero le note..."
             ).await;
 
-            // Initialize Ollama provider
-            let ollama = OllamaProvider::new(
-                config.ai_model.endpoint.clone(),
-                config.ai_model.model.clone(),
-            );
-
-            // Step 1: Clean the transcription
-            let cleaned_transcript = match ollama.cleanup_transcription(&raw_transcript).await {
-                Ok(cleaned) => {
-                    log::info!("Transcription cleaned successfully");
-                    cleaned
-                }
-                Err(e) => {
-                    log::warn!("Failed to clean transcription, using raw: {}", e);
-                    raw_transcript.clone() // Fallback to raw if cleanup fails
-                }
-            };
-
-            // Update status message - note generation phase
-            let _ = bot.edit_message_text(
-                msg.chat.id,
-                ack_msg.id,
-                "✅ Testo corretto! Genero le note..."
-            ).await;
-
-            // Step 2: Generate notes from cleaned transcript
-            match ollama.generate_notes(&cleaned_transcript).await {
-                Ok(notes) => {
+            // Delegate to agent
+            let agent = NoteGeneratorAgent::new(&config);
+            match agent.process_transcript(raw_transcript).await {
+                Ok(result) => {
                     // Delete status message
                     let _ = bot.delete_message(msg.chat.id, ack_msg.id).await;
 
-                    // Save notes to files
-                    let mut saved_files = Vec::new();
-                    for note in &notes {
-                        match note.save_to_file(&config.output.notes_dir) {
-                            Ok(path) => saved_files.push(path),
-                            Err(e) => log::error!("Failed to save note: {}", e),
-                        }
-                    }
-
-                    // Send success message with note details
+                    // Build response
                     let mut response = format!(
                         "🎉 Completato!\n\n📝 {} nota/e generata/e:\n\n",
-                        notes.len()
+                        result.notes.len()
                     );
 
-                    for (i, note) in notes.iter().enumerate() {
+                    for (i, note) in result.notes.iter().enumerate() {
                         response.push_str(&format!("{}. **{}**\n", i + 1, note.title));
                         response.push_str(&format!("   Tags: {}\n", note.tags.join(", ")));
                         response.push_str(&format!("   File: {}\n\n",
-                            saved_files.get(i)
+                            result.saved_paths.get(i)
                                 .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
                                 .unwrap_or_else(|| "errore".to_string())
                         ));
                     }
 
-                    // Show both raw and cleaned transcription if different
-                    if cleaned_transcript != raw_transcript {
+                    if result.cleaned_transcript != result.raw_transcript {
                         response.push_str("\n📊 Trascrizione (corretta):\n");
-                        response.push_str(&cleaned_transcript);
-                        response.push_str(&format!("\n\n🔍 Originale (Whisper):\n{}", raw_transcript));
+                        response.push_str(&result.cleaned_transcript);
+                        response.push_str(&format!("\n\n🔍 Originale (Whisper):\n{}", result.raw_transcript));
                     } else {
-                        response.push_str(&format!("\n📊 Trascrizione:\n{}", cleaned_transcript));
+                        response.push_str(&format!("\n📊 Trascrizione:\n{}", result.cleaned_transcript));
                     }
 
                     bot.send_message(msg.chat.id, response).await?;
                     log::info!("Notes generated and saved for user {}", msg.chat.id);
                 }
                 Err(e) => {
-                    log::error!("Note generation failed: {}", e);
-
-                    // Delete status message
+                    log::error!("Agent failed: {}", e);
                     let _ = bot.delete_message(msg.chat.id, ack_msg.id).await;
 
                     let error_msg = format!(
-                        "✅ Trascrizione completata, ma errore nella generazione note.\n\n\
-                        📝 Trascrizione:\n{}\n\n\
-                        ❌ Errore generazione note: {}\n\n\
+                        "❌ Errore nella generazione delle note.\n\n\
+                        Dettagli: {}\n\n\
                         💡 Verifica che Ollama sia in esecuzione: ollama list",
-                        cleaned_transcript, e
+                        e
                     );
                     bot.send_message(msg.chat.id, error_msg).await?;
                 }
@@ -201,8 +164,6 @@ pub async fn audio_handler(bot: Bot, msg: Message, config: Config) -> ResponseRe
         }
         Err(e) => {
             log::error!("Transcription failed: {}", e);
-
-            // Delete acknowledgment message
             let _ = bot.delete_message(msg.chat.id, ack_msg.id).await;
 
             let error_msg = format!(
