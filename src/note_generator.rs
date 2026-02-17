@@ -46,7 +46,7 @@ impl Note {
         md.push_str("---\n\n");
         md.push_str(&self.content);
 
-        // Render related notes as Obsidian wiki-links
+        // Render related notes as Obsidian wiki-links (using filenames)
         if !self.related_notes.is_empty() {
             md.push_str("\n\n---\n\n## Note correlate\n\n");
             for rel in &self.related_notes {
@@ -58,30 +58,34 @@ impl Note {
     }
 
     /// Generate a sanitized filename for this note.
+    ///
+    /// The filename is the title with whitespaces preserved, only removing
+    /// characters that are unsafe for filenames.
     pub fn generate_filename(&self) -> String {
         let safe_title: String = self
             .title
             .chars()
-            .map(|c| {
-                if c.is_alphanumeric() || c == ' ' || c == '-' {
-                    c
-                } else {
-                    '_'
-                }
-            })
+            .filter(|c| !['/', '\\', ':', '*', '?', '"', '<', '>', '|'].contains(c))
             .collect::<String>()
-            .replace("  ", " ")
-            .trim()
-            .to_lowercase()
-            .replace(' ', "-");
+            .replace("  ", " ");
+        let safe_title = safe_title.trim();
 
-        let safe_title = if safe_title.len() > 50 {
-            &safe_title[..50]
-        } else {
-            &safe_title
-        };
+        format!("{}.md", safe_title)
+    }
 
-        format!("{}_{}.md", self.date.format("%Y%m%d_%H%M%S"), safe_title)
+    /// Return the filename stem (filename without .md extension), used for Obsidian wiki-links.
+    pub fn filename_stem(&self) -> String {
+        let filename = self.generate_filename();
+        filename.strip_suffix(".md").unwrap_or(&filename).to_string()
+    }
+
+    /// Sanitize a tag for Obsidian: replace spaces with hyphens, keep only
+    /// alphanumeric chars, hyphens, underscores, and forward slashes.
+    fn sanitize_tag(tag: &str) -> String {
+        tag.replace(' ', "-")
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_' || *c == '/')
+            .collect()
     }
 }
 
@@ -194,7 +198,7 @@ impl NoteGeneratorAgent {
             .map(|nd| Note {
                 title: nd.title,
                 content: nd.content,
-                tags: nd.tags,
+                tags: nd.tags.iter().map(|t| Note::sanitize_tag(t)).collect(),
                 date: now,
                 source: "voice-memo".to_string(),
                 related_notes: nd.related_notes.unwrap_or_default(),
@@ -232,7 +236,11 @@ impl NoteGeneratorAgent {
             prompt.push_str("Queste sono le note già presenti nel vault. DEVI consultare questa lista per i link interni e i related_notes.\n\n");
 
             for note in existing_notes {
-                prompt.push_str(&format!("- **{}**", note.title));
+                let stem = note
+                    .filename
+                    .strip_suffix(".md")
+                    .unwrap_or(&note.filename);
+                prompt.push_str(&format!("- **{}** (file: `{}`)", note.title, stem));
                 if !note.date.is_empty() {
                     prompt.push_str(&format!(" ({})", note.date));
                 }
@@ -256,7 +264,7 @@ Regole per la creazione delle note:
 - Se la trascrizione contiene più argomenti distinti, crea note separate per ciascuno
 - Ogni nota deve avere un titolo chiaro e descrittivo
 - Struttura il contenuto con headers (##), elenchi puntati e formattazione appropriata
-- Suggerisci 2-5 tag rilevanti per ogni nota
+- Suggerisci 2-5 tag rilevanti per ogni nota. I tag NON devono contenere spazi (usa il trattino `-` al posto degli spazi, es: "machine-learning" invece di "machine learning")
 - Mantieni il tono e l'intento originale del messaggio
 - Se ci sono task o azioni da fare, evidenziali chiaramente
 
@@ -265,12 +273,12 @@ Regole per la creazione delle note:
 Questa è una funzionalità CRITICA. Devi creare collegamenti tra le note usando la sintassi Obsidian `[[Titolo Nota]]`.
 
 ### Regole per i link inline nel contenuto:
-- Quando nel contenuto fai riferimento a un concetto o argomento che corrisponde a una nota esistente, DEVI racchiuderlo in `[[Titolo Nota]]` usando il titolo ESATTO dalla lista delle note esistenti
+- Quando nel contenuto fai riferimento a un concetto o argomento che corrisponde a una nota esistente, DEVI racchiuderlo in `[[nome file]]` usando il NOME FILE (senza .md) dalla lista delle note esistenti, NON il titolo
 - Inserisci i link in modo naturale nel testo, non forzarli dove non hanno senso
-- Esempio: se esiste una nota "Architettura Microservizi", scrivi "...come descritto in [[Architettura Microservizi]]..."
+- Esempio: se esiste una nota con file `Architettura Microservizi`, scrivi "...come descritto in [[Architettura Microservizi]]..."
 
 ### Regole per related_notes:
-- DEVI popolare il campo "related_notes" con i titoli ESATTI delle note esistenti che sono tematicamente correlate
+- DEVI popolare il campo "related_notes" con i NOMI FILE (senza .md) delle note esistenti che sono tematicamente correlate
 - Controlla i tag in comune e gli argomenti affini per identificare le correlazioni
 - Non lasciare "related_notes" vuoto se ci sono note esistenti pertinenti
 
@@ -298,8 +306,20 @@ Rispondi SOLO con il JSON, senza testo aggiuntivo prima o dopo."#);
     /// 2. Cross-links notes generated in the same batch: adds sibling titles
     ///    to `related_notes` when they share at least one tag.
     fn post_process_links(mut notes: Vec<Note>, existing_notes: &[NoteMeta]) -> Vec<Note> {
-        // Collect all titles to link against: existing notes + batch siblings
-        let existing_titles: Vec<&str> = existing_notes.iter().map(|n| n.title.as_str()).collect();
+        // Build a map: title -> filename stem for existing notes
+        let existing_links: Vec<(&str, String)> = existing_notes
+            .iter()
+            .map(|n| {
+                let stem = n
+                    .filename
+                    .strip_suffix(".md")
+                    .unwrap_or(&n.filename)
+                    .to_string();
+                (n.title.as_str(), stem)
+            })
+            .collect();
+
+        let batch_stems: Vec<String> = notes.iter().map(|n| n.filename_stem()).collect();
         let batch_titles: Vec<String> = notes.iter().map(|n| n.title.clone()).collect();
         let batch_tags: Vec<std::collections::HashSet<String>> = notes
             .iter()
@@ -308,32 +328,72 @@ Rispondi SOLO con il JSON, senza testo aggiuntivo prima o dopo."#);
 
         for i in 0..notes.len() {
             // --- Inject [[links]] for existing note titles mentioned in content ---
-            for title in &existing_titles {
-                // Skip if already linked
-                let wiki_link = format!("[[{}]]", title);
+            for (title, stem) in &existing_links {
+                let wiki_link = format!("[[{}]]", stem);
+                // Skip if already linked by filename stem
                 if notes[i].content.contains(&wiki_link) {
                     continue;
                 }
-                // Replace plain mentions with [[links]] (case-sensitive exact match)
+                // Also skip if LLM already linked by title — replace with filename-based link
+                let title_link = format!("[[{}]]", title);
+                if notes[i].content.contains(&title_link) {
+                    notes[i].content = notes[i].content.replace(&title_link, &wiki_link);
+                    continue;
+                }
+                // Replace plain mentions of the title with [[filename]] links
                 if notes[i].content.contains(*title) {
                     notes[i].content = notes[i].content.replace(*title, &wiki_link);
                 }
             }
 
-            // --- Cross-link sibling notes from the same batch ---
+            // --- Fix LLM-generated links for sibling notes: replace title-based with filename-based ---
             for j in 0..notes.len() {
                 if i == j {
                     continue;
                 }
-                let sibling_title = &batch_titles[j];
+                let title_link = format!("[[{}]]", &batch_titles[j]);
+                let stem_link = format!("[[{}]]", &batch_stems[j]);
+                if notes[i].content.contains(&title_link) {
+                    notes[i].content = notes[i].content.replace(&title_link, &stem_link);
+                }
+            }
+
+            // --- Cross-link sibling notes from the same batch (using filename stems) ---
+            for j in 0..notes.len() {
+                if i == j {
+                    continue;
+                }
+                let sibling_stem = &batch_stems[j];
 
                 // Add to related_notes if they share at least one tag
                 if !batch_tags[i].is_disjoint(&batch_tags[j])
-                    && !notes[i].related_notes.contains(sibling_title)
+                    && !notes[i].related_notes.contains(sibling_stem)
                 {
-                    notes[i].related_notes.push(sibling_title.clone());
+                    notes[i].related_notes.push(sibling_stem.clone());
                 }
             }
+
+            // --- Convert any title-based related_notes to filename stems ---
+            let mut fixed_related: Vec<String> = Vec::new();
+            for rel in &notes[i].related_notes {
+                // Check if it matches an existing note title → use stem
+                if let Some((_, stem)) = existing_links.iter().find(|(t, _)| *t == rel.as_str()) {
+                    if !fixed_related.contains(stem) {
+                        fixed_related.push(stem.clone());
+                    }
+                } else if let Some(idx) = batch_titles.iter().position(|t| t == rel) {
+                    // It's a sibling title → use its stem
+                    if !fixed_related.contains(&batch_stems[idx]) {
+                        fixed_related.push(batch_stems[idx].clone());
+                    }
+                } else {
+                    // Already a stem or unknown — keep as-is
+                    if !fixed_related.contains(rel) {
+                        fixed_related.push(rel.clone());
+                    }
+                }
+            }
+            notes[i].related_notes = fixed_related;
         }
 
         notes
@@ -378,10 +438,30 @@ mod tests {
             related_notes: vec![],
         };
         let filename = note.generate_filename();
-        assert!(filename.starts_with("20240115_103000_"));
-        assert!(filename.ends_with(".md"));
-        assert!(!filename.contains('!'));
+        // Filename is title with unsafe chars removed, preserving spaces
+        assert_eq!(filename, "Test Note Example!.md");
         assert!(!filename.contains(':'));
+    }
+
+    #[test]
+    fn test_filename_stem() {
+        let note = Note {
+            title: "My Great Note".to_string(),
+            content: "content".to_string(),
+            tags: vec![],
+            date: Utc::now(),
+            source: "voice-memo".to_string(),
+            related_notes: vec![],
+        };
+        assert_eq!(note.filename_stem(), "My Great Note");
+    }
+
+    #[test]
+    fn test_sanitize_tag() {
+        assert_eq!(Note::sanitize_tag("machine learning"), "machine-learning");
+        assert_eq!(Note::sanitize_tag("rust"), "rust");
+        assert_eq!(Note::sanitize_tag("c++/templates"), "c/templates");
+        assert_eq!(Note::sanitize_tag("my_tag"), "my_tag");
     }
 
     #[test]
@@ -395,8 +475,8 @@ mod tests {
             related_notes: vec!["Other Note".to_string(), "Another".to_string()],
         };
         let md = note.to_markdown();
-        assert!(md.contains("[[Other Note]]"));
-        assert!(md.contains("[[Another]]"));
+        assert!(md.contains("[[Other Note]]"), "should have wiki-link for related note");
+        assert!(md.contains("[[Another]]"), "should have wiki-link for related note");
         assert!(md.contains("related:"));
     }
 
@@ -430,12 +510,12 @@ mod tests {
     }
 
     #[test]
-    fn test_post_process_links_injects_wiki_links() {
+    fn test_post_process_links_injects_wiki_links_with_filename() {
         let existing = vec![NoteMeta {
             title: "Architettura Microservizi".to_string(),
             date: "2024-01-10".to_string(),
             tags: vec!["architettura".to_string()],
-            filename: "arch.md".to_string(),
+            filename: "Architettura Microservizi.md".to_string(),
             source: "voice-memo".to_string(),
         }];
         let notes = vec![Note {
@@ -448,22 +528,48 @@ mod tests {
         }];
 
         let result = NoteGeneratorAgent::post_process_links(notes, &existing);
+        // Should use filename stem for the wiki-link
         assert!(result[0].content.contains("[[Architettura Microservizi]]"));
-        // Should not double-wrap
         assert!(!result[0].content.contains("[[[["));
     }
 
     #[test]
-    fn test_post_process_links_does_not_double_wrap() {
+    fn test_post_process_links_uses_filename_not_title() {
+        // Existing note with old-style filename (different from title)
         let existing = vec![NoteMeta {
             title: "Rust Tips".to_string(),
             date: "2024-01-10".to_string(),
             tags: vec!["rust".to_string()],
-            filename: "rust.md".to_string(),
+            filename: "20240110_rust-tips.md".to_string(),
             source: "voice-memo".to_string(),
         }];
         let notes = vec![Note {
             title: "Appunti".to_string(),
+            content: "Vedi Rust Tips per dettagli.".to_string(),
+            tags: vec!["rust".to_string()],
+            date: Utc::now(),
+            source: "voice-memo".to_string(),
+            related_notes: vec![],
+        }];
+
+        let result = NoteGeneratorAgent::post_process_links(notes, &existing);
+        // Should link using filename stem, not title
+        assert!(result[0].content.contains("[[20240110_rust-tips]]"));
+        assert!(!result[0].content.contains("[[Rust Tips]]"));
+    }
+
+    #[test]
+    fn test_post_process_replaces_title_link_with_filename_link() {
+        let existing = vec![NoteMeta {
+            title: "Rust Tips".to_string(),
+            date: "2024-01-10".to_string(),
+            tags: vec!["rust".to_string()],
+            filename: "20240110_rust-tips.md".to_string(),
+            source: "voice-memo".to_string(),
+        }];
+        let notes = vec![Note {
+            title: "Appunti".to_string(),
+            // LLM generated a title-based link
             content: "Vedi [[Rust Tips]] per dettagli.".to_string(),
             tags: vec!["rust".to_string()],
             date: Utc::now(),
@@ -472,12 +578,13 @@ mod tests {
         }];
 
         let result = NoteGeneratorAgent::post_process_links(notes, &existing);
-        assert!(result[0].content.contains("[[Rust Tips]]"));
-        assert!(!result[0].content.contains("[[[[Rust Tips]]]]"));
+        // Should replace title-based link with filename-based link
+        assert!(result[0].content.contains("[[20240110_rust-tips]]"));
+        assert!(!result[0].content.contains("[[Rust Tips]]"));
     }
 
     #[test]
-    fn test_post_process_cross_links_batch_notes() {
+    fn test_post_process_cross_links_batch_notes_use_filename_stems() {
         let notes = vec![
             Note {
                 title: "Nota A".to_string(),
@@ -506,7 +613,7 @@ mod tests {
         ];
 
         let result = NoteGeneratorAgent::post_process_links(notes, &[]);
-        // A and B share "rust" tag — should be cross-linked
+        // A and B share "rust" tag — should be cross-linked using filename stems
         assert!(result[0].related_notes.contains(&"Nota B".to_string()));
         assert!(result[1].related_notes.contains(&"Nota A".to_string()));
         // C has no shared tags — should not be linked
