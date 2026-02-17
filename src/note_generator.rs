@@ -203,6 +203,9 @@ impl NoteGeneratorAgent {
 
         log::info!("Agent: Step 3 - Generated {} note(s)", notes.len());
 
+        // Step 3b: Post-process — inject [[links]] for existing note titles and cross-link batch notes
+        let notes = Self::post_process_links(notes, &existing_notes);
+
         // Step 4: Save notes
         log::info!("Agent: Step 4 - Saving notes");
         let saved_paths = self
@@ -221,7 +224,28 @@ impl NoteGeneratorAgent {
 
     /// Build the system prompt, injecting existing notes context.
     fn build_system_prompt(existing_notes: &[NoteMeta]) -> String {
-        let base = r#"Sei un assistente esperto nella creazione di note strutturate per un sistema di gestione della conoscenza personale (second brain).
+        let mut prompt = String::new();
+
+        // Existing notes context first — so the LLM sees them prominently
+        if !existing_notes.is_empty() {
+            prompt.push_str("## NOTE ESISTENTI NEL SISTEMA\n\n");
+            prompt.push_str("Queste sono le note già presenti nel vault. DEVI consultare questa lista per i link interni e i related_notes.\n\n");
+
+            for note in existing_notes {
+                prompt.push_str(&format!("- **{}**", note.title));
+                if !note.date.is_empty() {
+                    prompt.push_str(&format!(" ({})", note.date));
+                }
+                if !note.tags.is_empty() {
+                    prompt.push_str(&format!(" [{}]", note.tags.join(", ")));
+                }
+                prompt.push('\n');
+            }
+
+            prompt.push('\n');
+        }
+
+        prompt.push_str(r#"Sei un assistente esperto nella creazione di note strutturate per un sistema di gestione della conoscenza personale (second brain) in Obsidian.
 
 Il tuo compito è:
 1. Analizzare la trascrizione di un messaggio vocale
@@ -234,39 +258,85 @@ Regole per la creazione delle note:
 - Struttura il contenuto con headers (##), elenchi puntati e formattazione appropriata
 - Suggerisci 2-5 tag rilevanti per ogni nota
 - Mantieni il tono e l'intento originale del messaggio
-- Se ci sono task o azioni da fare, evidenziali chiaramente"#;
+- Se ci sono task o azioni da fare, evidenziali chiaramente
 
-        let mut prompt = base.to_string();
+## LINK INTERNI (OBBLIGATORIO)
 
-        if !existing_notes.is_empty() {
-            prompt.push_str("\n\n## NOTE ESISTENTI NEL SISTEMA\n\n");
-            prompt.push_str("Di seguito le note già presenti. Riutilizza i tag esistenti quando pertinente e identifica eventuali note correlate nel campo \"related_notes\" (usa i titoli esatti).\n\n");
+Questa è una funzionalità CRITICA. Devi creare collegamenti tra le note usando la sintassi Obsidian `[[Titolo Nota]]`.
 
-            for note in existing_notes {
-                prompt.push_str(&format!("- **{}**", note.title));
-                if !note.date.is_empty() {
-                    prompt.push_str(&format!(" ({})", note.date));
-                }
-                if !note.tags.is_empty() {
-                    prompt.push_str(&format!(" [{}]", note.tags.join(", ")));
-                }
-                prompt.push('\n');
-            }
-        }
+### Regole per i link inline nel contenuto:
+- Quando nel contenuto fai riferimento a un concetto o argomento che corrisponde a una nota esistente, DEVI racchiuderlo in `[[Titolo Nota]]` usando il titolo ESATTO dalla lista delle note esistenti
+- Inserisci i link in modo naturale nel testo, non forzarli dove non hanno senso
+- Esempio: se esiste una nota "Architettura Microservizi", scrivi "...come descritto in [[Architettura Microservizi]]..."
 
-        prompt.push_str(&format!(
-            r#"
+### Regole per related_notes:
+- DEVI popolare il campo "related_notes" con i titoli ESATTI delle note esistenti che sono tematicamente correlate
+- Controlla i tag in comune e gli argomenti affini per identificare le correlazioni
+- Non lasciare "related_notes" vuoto se ci sono note esistenti pertinenti
+
+### Regole per note multiple dalla stessa trascrizione:
+- Se crei più note dalla stessa trascrizione, DEVI farle riferimento tra loro con [[link]] nel contenuto
+- Ogni nota deve menzionare le altre note generate nello stesso batch dove pertinente"#);
+
+        prompt.push_str(r#"
 
 Formato di output: JSON valido con array "notes" contenente oggetti con campi:
 - "title" (stringa)
-- "content" (markdown)
+- "content" (markdown — DEVE contenere [[link]] a note esistenti e note sorelle dove pertinente)
 - "tags" (array di stringhe)
-- "related_notes" (array di stringhe — titoli di note esistenti correlate, oppure array vuoto)
+- "related_notes" (array di stringhe — titoli ESATTI di note esistenti correlate, NON lasciare vuoto se ci sono correlazioni)
 
-Rispondi SOLO con il JSON, senza testo aggiuntivo prima o dopo."#
-        ));
+Rispondi SOLO con il JSON, senza testo aggiuntivo prima o dopo."#);
 
         prompt
+    }
+
+    /// Post-process notes to ensure internal links are present.
+    ///
+    /// 1. Scans each note's content for exact title matches of existing notes
+    ///    and wraps unlinked mentions in `[[]]`.
+    /// 2. Cross-links notes generated in the same batch: adds sibling titles
+    ///    to `related_notes` when they share at least one tag.
+    fn post_process_links(mut notes: Vec<Note>, existing_notes: &[NoteMeta]) -> Vec<Note> {
+        // Collect all titles to link against: existing notes + batch siblings
+        let existing_titles: Vec<&str> = existing_notes.iter().map(|n| n.title.as_str()).collect();
+        let batch_titles: Vec<String> = notes.iter().map(|n| n.title.clone()).collect();
+        let batch_tags: Vec<std::collections::HashSet<String>> = notes
+            .iter()
+            .map(|n| n.tags.iter().cloned().collect())
+            .collect();
+
+        for i in 0..notes.len() {
+            // --- Inject [[links]] for existing note titles mentioned in content ---
+            for title in &existing_titles {
+                // Skip if already linked
+                let wiki_link = format!("[[{}]]", title);
+                if notes[i].content.contains(&wiki_link) {
+                    continue;
+                }
+                // Replace plain mentions with [[links]] (case-sensitive exact match)
+                if notes[i].content.contains(*title) {
+                    notes[i].content = notes[i].content.replace(*title, &wiki_link);
+                }
+            }
+
+            // --- Cross-link sibling notes from the same batch ---
+            for j in 0..notes.len() {
+                if i == j {
+                    continue;
+                }
+                let sibling_title = &batch_titles[j];
+
+                // Add to related_notes if they share at least one tag
+                if !batch_tags[i].is_disjoint(&batch_tags[j])
+                    && !notes[i].related_notes.contains(sibling_title)
+                {
+                    notes[i].related_notes.push(sibling_title.clone());
+                }
+            }
+        }
+
+        notes
     }
 
     /// Build the user prompt from the transcript.
@@ -350,5 +420,97 @@ mod tests {
         assert!(prompt.contains("NOTE ESISTENTI NEL SISTEMA"));
         assert!(prompt.contains("Rust Tips"));
         assert!(prompt.contains("rust, programming"));
+        // New: verify internal links section is present
+        assert!(prompt.contains("LINK INTERNI (OBBLIGATORIO)"));
+        assert!(prompt.contains("[[Titolo Nota]]"));
+        // Existing notes should appear before the main instructions
+        let notes_pos = prompt.find("NOTE ESISTENTI").unwrap();
+        let rules_pos = prompt.find("Regole per la creazione").unwrap();
+        assert!(notes_pos < rules_pos, "Existing notes should appear before rules");
+    }
+
+    #[test]
+    fn test_post_process_links_injects_wiki_links() {
+        let existing = vec![NoteMeta {
+            title: "Architettura Microservizi".to_string(),
+            date: "2024-01-10".to_string(),
+            tags: vec!["architettura".to_string()],
+            filename: "arch.md".to_string(),
+            source: "voice-memo".to_string(),
+        }];
+        let notes = vec![Note {
+            title: "API Gateway".to_string(),
+            content: "Il pattern API Gateway si integra con Architettura Microservizi per gestire il routing.".to_string(),
+            tags: vec!["api".to_string()],
+            date: Utc::now(),
+            source: "voice-memo".to_string(),
+            related_notes: vec![],
+        }];
+
+        let result = NoteGeneratorAgent::post_process_links(notes, &existing);
+        assert!(result[0].content.contains("[[Architettura Microservizi]]"));
+        // Should not double-wrap
+        assert!(!result[0].content.contains("[[[["));
+    }
+
+    #[test]
+    fn test_post_process_links_does_not_double_wrap() {
+        let existing = vec![NoteMeta {
+            title: "Rust Tips".to_string(),
+            date: "2024-01-10".to_string(),
+            tags: vec!["rust".to_string()],
+            filename: "rust.md".to_string(),
+            source: "voice-memo".to_string(),
+        }];
+        let notes = vec![Note {
+            title: "Appunti".to_string(),
+            content: "Vedi [[Rust Tips]] per dettagli.".to_string(),
+            tags: vec!["rust".to_string()],
+            date: Utc::now(),
+            source: "voice-memo".to_string(),
+            related_notes: vec![],
+        }];
+
+        let result = NoteGeneratorAgent::post_process_links(notes, &existing);
+        assert!(result[0].content.contains("[[Rust Tips]]"));
+        assert!(!result[0].content.contains("[[[[Rust Tips]]]]"));
+    }
+
+    #[test]
+    fn test_post_process_cross_links_batch_notes() {
+        let notes = vec![
+            Note {
+                title: "Nota A".to_string(),
+                content: "Contenuto A".to_string(),
+                tags: vec!["rust".to_string(), "coding".to_string()],
+                date: Utc::now(),
+                source: "voice-memo".to_string(),
+                related_notes: vec![],
+            },
+            Note {
+                title: "Nota B".to_string(),
+                content: "Contenuto B".to_string(),
+                tags: vec!["rust".to_string()],
+                date: Utc::now(),
+                source: "voice-memo".to_string(),
+                related_notes: vec![],
+            },
+            Note {
+                title: "Nota C".to_string(),
+                content: "Contenuto C".to_string(),
+                tags: vec!["unrelated".to_string()],
+                date: Utc::now(),
+                source: "voice-memo".to_string(),
+                related_notes: vec![],
+            },
+        ];
+
+        let result = NoteGeneratorAgent::post_process_links(notes, &[]);
+        // A and B share "rust" tag — should be cross-linked
+        assert!(result[0].related_notes.contains(&"Nota B".to_string()));
+        assert!(result[1].related_notes.contains(&"Nota A".to_string()));
+        // C has no shared tags — should not be linked
+        assert!(!result[0].related_notes.contains(&"Nota C".to_string()));
+        assert!(!result[2].related_notes.contains(&"Nota A".to_string()));
     }
 }
