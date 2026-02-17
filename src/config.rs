@@ -51,10 +51,18 @@ pub struct NotesGenerationConfig {
     pub top_p: f32,
 }
 
-fn default_true() -> bool { true }
-fn default_correction_temperature() -> f32 { 0.3 }
-fn default_notes_temperature() -> f32 { 0.7 }
-fn default_top_p() -> f32 { 0.9 }
+fn default_true() -> bool {
+    true
+}
+fn default_correction_temperature() -> f32 {
+    0.3
+}
+fn default_notes_temperature() -> f32 {
+    0.7
+}
+fn default_top_p() -> f32 {
+    0.9
+}
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct AiModelConfig {
@@ -89,8 +97,7 @@ impl Config {
         let content = fs::read_to_string(path)
             .context("Failed to read config file. Make sure config.toml exists.")?;
 
-        let mut config: Config = toml::from_str(&content)
-            .context("Failed to parse config file")?;
+        let mut config: Config = toml::from_str(&content).context("Failed to parse config file")?;
 
         // Override with environment variable if set
         if let Ok(token) = std::env::var("TELOXIDE_TOKEN") {
@@ -102,12 +109,9 @@ impl Config {
 
     /// Create output directories if they don't exist
     pub fn ensure_directories(&self) -> Result<()> {
-        fs::create_dir_all(&self.output.notes_dir)
-            .context("Failed to create notes directory")?;
-        fs::create_dir_all(&self.output.tasks_dir)
-            .context("Failed to create tasks directory")?;
-        fs::create_dir_all(&self.output.temp_dir)
-            .context("Failed to create temp directory")?;
+        fs::create_dir_all(&self.output.notes_dir).context("Failed to create notes directory")?;
+        fs::create_dir_all(&self.output.tasks_dir).context("Failed to create tasks directory")?;
+        fs::create_dir_all(&self.output.temp_dir).context("Failed to create temp directory")?;
         Ok(())
     }
 }
@@ -161,7 +165,10 @@ mod tests {
         assert_eq!(config.telegram.bot_token, "test_token");
         assert_eq!(config.transcription.language, "it");
         assert_eq!(config.transcription.provider, "whisper_local");
-        assert_eq!(config.transcription.model_path.as_deref(), Some("./models/ggml-large-v3.bin"));
+        assert_eq!(
+            config.transcription.model_path.as_deref(),
+            Some("./models/ggml-large-v3.bin")
+        );
         assert_eq!(config.correction.enabled, true);
         assert_eq!(config.correction.temperature, 0.3);
         assert_eq!(config.notes_generation.temperature, 0.7);
@@ -208,7 +215,10 @@ mod tests {
 
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(config.transcription.provider, "deepgram");
-        assert_eq!(config.transcription.api_key_env.as_deref(), Some("DEEPGRAM_API_KEY"));
+        assert_eq!(
+            config.transcription.api_key_env.as_deref(),
+            Some("DEEPGRAM_API_KEY")
+        );
         assert_eq!(config.transcription.model.as_deref(), Some("nova-2"));
         assert_eq!(config.transcription.model_path, None);
         assert_eq!(config.ai_model.endpoint, "http://localhost:11434");
@@ -255,8 +265,14 @@ mod tests {
 
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(config.transcription.provider, "groq");
-        assert_eq!(config.transcription.api_key_env.as_deref(), Some("GROQ_API_KEY"));
-        assert_eq!(config.transcription.model.as_deref(), Some("whisper-large-v3-turbo"));
+        assert_eq!(
+            config.transcription.api_key_env.as_deref(),
+            Some("GROQ_API_KEY")
+        );
+        assert_eq!(
+            config.transcription.model.as_deref(),
+            Some("whisper-large-v3-turbo")
+        );
         assert_eq!(config.transcription.model_path, None);
         assert_eq!(config.correction.enabled, false);
         // Check defaults applied
